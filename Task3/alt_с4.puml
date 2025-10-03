@@ -1,0 +1,195 @@
+@startuml Архитектура_АгроТех_Системы_v4_c4_behavior_detector
+
+title C4: Уровень кода внутри "Behavior Detector" (TensorFlow Lite)
+
+class BehaviorDetector {
+  -model: TFLiteModel
+  -confidence_thresholds: Dict[BehaviorType, float]
+  -inference_times: List[float]
+  +process_frame(frame: np.ndarray) -> List[Detection]
+  +load_model(model_path: str) -> bool
+  +update_thresholds(new_thresholds: Dict) -> bool
+  -preprocess_frame(frame: np.ndarray) -> np.ndarray
+  -postprocess_output(raw_output: np.ndarray, frame_shape: Tuple) -> List[Detection]
+  -calculate_behavior_type(detections: List[Detection]) -> BehaviorType
+}
+note top of BehaviorDetector
+  <b>Главный координатор детекции</b>
+  • Обрабатывает видео-кадры в реальном времени
+  • Координирует работу всех компонентов
+  • Обеспечивает производительность <5 сек
+end note
+
+class TFLiteModel {
+  -interpreter: tf.lite.Interpreter
+  -input_details: List
+  -output_details: List
+  -input_shape: Tuple[int, int, int]
+  +predict(input_data: np.ndarray) -> np.ndarray
+  +is_loaded() -> bool
+  +get_model_info() -> Dict
+}
+note right of TFLiteModel
+  <b>Обертка для ИИ-модели</b>
+  • Загружает и исполняет TensorFlow Lite модель
+  • Оптимизирована для edge-устройств
+  • Поддерживает квантованные модели
+end note
+
+class Detection {
+  -bbox: BoundingBox
+  -confidence: float
+  -class_id: int
+  -timestamp: datetime
+  -track_id: Optional[int]
+  +get_behavior_type() -> BehaviorType
+  +is_valid() -> bool
+  +to_dict() -> Dict
+}
+note left of Detection
+  <b>Структура данных детекции</b>
+  • Хранит результат обнаружения объекта
+  • Содержит координаты и уверенность
+  • Поддерживает трекинг между кадрами
+end note
+
+class BoundingBox {
+  -x: int
+  -y: int
+  -width: int
+  -height: int
+  +area() -> float
+  +intersection(other: BoundingBox) -> float
+  +iou(other: BoundingBox) -> float
+  +contains_point(x: int, y: int) -> bool
+}
+note bottom of BoundingBox
+  <b>Математика bounding box</b>
+  • Расчет пересечений (IoU)
+  • Проверка коллизий объектов
+  • Пространственные операции
+end note
+
+class BehaviorAnalyzer {
+  -event_buffer: Deque[Detection]
+  -min_detections_for_event: int
+  -time_window_seconds: int
+  +analyze_detections(detections: List[Detection]) -> Optional[BehaviorEvent]
+  +detect_fight_pattern(detections: List[Detection]) -> bool
+  +detect_crushing_pattern(detections: List[Detection]) -> bool
+  +detect_agitation_pattern(detections: List[Detection]) -> bool
+  -calculate_movement_intensity(detections: List[Detection]) -> float
+  -filter_false_positives(detections: List[Detection]) -> List[Detection]
+}
+note right of BehaviorAnalyzer
+  <b>Анализ поведения животных</b>
+  • Детектирует драки и задавливания
+  • Фильтрует ложные срабатывания
+  • Анализирует паттерны движения
+end note
+
+class ModelManager {
+  -available_models: Dict[str, TFLiteModel]
+  -current_model: str
+  -model_cache: LRUCache
+  +switch_model(model_name: str) -> bool
+  +preload_model(model_name: str) -> bool
+  +get_model_stats() -> Dict
+  +update_model_from_storage(model_path: str) -> bool
+}
+note left of ModelManager
+  <b>Управление версиями моделей</b>
+  • Hot-swap моделей без остановки
+  • Кэширование для быстрой загрузки
+  • Обновление моделей из хранилища
+end note
+
+class PerformanceMonitor {
+  -inference_times: Deque[float]
+  -accuracy_metrics: Dict
+  +record_inference_time(time_ms: float) -> None
+  +calculate_accuracy(true_positives: int, false_positives: int) -> float
+  +get_performance_report() -> Dict
+  +check_performance_degradation() -> bool
+}
+note bottom of PerformanceMonitor
+  <b>Мониторинг производительности</b>
+  • Замер времени инференса
+  • Расчет точности детекции
+  • Выявление деградации модели
+end note
+
+enum BehaviorType {
+  NORMAL
+  FIGHT
+  CRUSHING
+  AGITATION
+  SICKNESS
+  UNKNOWN
+}
+
+class BehaviorEvent {
+  -event_type: BehaviorType
+  -detections: List[Detection]
+  -confidence: float
+  -timestamp: datetime
+  -location: Tuple[int, int]
+  +should_trigger_alert() -> bool
+  +get_alert_level() -> AlertLevel
+  +to_json() -> str
+}
+note right of BehaviorEvent
+  <b>Финальное событие для системы</b>
+  • Определяет уровень важности
+  • Форматирует данные для API
+  • Решает нужно ли оповещение
+end note
+
+' === Внутрение связи ===
+BehaviorDetector --> TFLiteModel : "использует для инференса"
+BehaviorDetector --> Detection : "создает"
+BehaviorDetector --> BehaviorAnalyzer : "передает для анализа"
+BehaviorAnalyzer --> BehaviorEvent : "генерирует"
+Detection --> BoundingBox : "содержит"
+Detection --> BehaviorType : "имеет тип"
+BehaviorEvent --> BehaviorType : "тип события"
+BehaviorDetector --> ModelManager : "управление моделями"
+BehaviorDetector --> PerformanceMonitor : "метрики производительности"
+
+' === Внешние зависимости ===
+class FramePreprocessor {
+  +get_processed_frame() -> np.ndarray
+}
+note left of FramePreprocessor
+  <b>Внешний: подготовка кадров</b>
+  • Коррекция освещения
+  • Улучшение ночного видения
+  • Стабилизация изображения
+end note
+
+class AnimalTracker {
+  +assign_track_ids(detections: List[Detection]) -> List[Detection]
+}
+note right of AnimalTracker
+  <b>Внешний: трекинг животных</b>
+  • Идентификация особей
+  • Отслеживание перемещений
+  • Решение проблемы похожести
+end note
+
+class RedisClient {
+  +cache_detections(key: str, detections: List[Detection], ttl: int) -> bool
+  +get_cached_detections(key: str) -> Optional[List[Detection]]
+}
+
+class PrometheusMetrics {
+  +record_metric(name: str, value: float) -> bool
+}
+
+' === Внешние связи ===
+FramePreprocessor --> BehaviorDetector : "передает обработанные кадры"
+BehaviorDetector --> AnimalTracker : "отправляет детекции для трекинга"
+BehaviorDetector --> RedisClient : "кэширует результаты"
+BehaviorDetector --> PrometheusMetrics : "отправляет метрики"
+
+@enduml

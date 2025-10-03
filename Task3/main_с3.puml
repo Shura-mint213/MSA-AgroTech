@@ -1,0 +1,45 @@
+@startuml Архитектура_АгроТех_Системы_v4_c3
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C3: Компоненты внутри "Аналитический модуль" (Python+Spark)
+
+Container_Boundary(analysis_ctx, "analysis_ctx (Аналитический модуль)") {
+
+    Component(video_processor, "Video Processor", "Python, OpenCV, TensorFlow", "Обрабатывает видео-потоки, детектирует события (драка, задавливание, гибель) с помощью готовой модели")
+    Component(metrics_analyzer, "Metrics Analyzer", "Python, Spark, Pandas", "Анализирует метрики датчиков, прогнозирует расход корма, пересчитывает поголовье")
+    Component(event_processor, "Event Processor", "Python", "Обрабатывает входящие события от датчиков и видео, формирует уведомления")
+    Component(api_gateway, "Internal API Gateway", "Python, FastAPI", "Предоставляет REST API для веб-портала и мобильного приложения")
+    Component(data_sync, "Data Sync Service", "Python", "Синхронизирует данные с центральной платформой (Kafka) и Prometheus")
+
+    Rel(video_processor, event_processor, "Отправляет события", "Internal Event Bus (JSON)")
+    Rel(metrics_analyzer, event_processor, "Отправляет аномалии", "Internal Event Bus (JSON)")
+    Rel(event_processor, api_gateway, "Передает уведомления для UI", "REST (Internal)")
+    Rel(event_processor, data_sync, "Передает события для синхронизации", "Internal API")
+    Rel(metrics_analyzer, data_sync, "Передает метрики", "Internal API")
+    Rel(api_gateway, data_sync, "Запросы на данные", "Internal API")
+}
+
+' ========= ВНЕШНИЕ СИСТЕМЫ =========
+ContainerDb(ext_minio, "MinIO", "S3", "Внешнее хранилище видео")
+ContainerDb(ext_postgres, "PostgreSQL", "SQL", "Внешняя БД метрик")
+ContainerDb(ext_prometheus, "Prometheus", "Time Series DB", "Внешняя система мониторинга")
+Container(ext_rabbitmq, "RabbitMQ", "AMQP/MQTT", "Внешний брокер сообщений")
+Container(ext_agro_platform, "Аграрная платформа", "Kafka", "Внешняя центральная система")
+Container(ext_web_portal, "Веб-портал", "REST API", "Внешний UI")
+Container(ext_mobile_app, "Мобильное приложение", "REST API", "Внешний UI")
+
+' === ВЗАИМОДЕЙСТВИЯ ===
+Rel(ext_rabbitmq, event_processor, "Данные с датчиков", "AMQP")
+Rel(ext_minio, video_processor, "Видео для обработки", "S3 API")
+Rel(ext_postgres, metrics_analyzer, "Метрики для анализа", "JDBC")
+
+Rel(api_gateway, ext_web_portal, "Рекомендации, отчеты, данные", "REST API")
+Rel(api_gateway, ext_mobile_app, "Рекомендации, уведомления", "REST API")
+Rel(data_sync, ext_agro_platform, "Передача метрик", "Kafka Protocol")
+Rel(data_sync, ext_prometheus, "Отправка метрик", "HTTP")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,262 @@
+@startuml Архитектура_АгроТех_Системы_v4_c4_classes
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C4: Уровень кода внутри "Video Processor" (Python + OpenCV/TensorFlow) — Классовая диаграмма
+
+package "Video Processor" #DDDDDD {
+
+    ' === Классы системы ===
+
+    class VideoStreamManager {
+        -camera_configs: List[CameraConfig]
+        -rtsp_connections: Dict[str, cv2.VideoCapture]
+        +start_stream(camera_id: str) -> bool
+        +get_frame(camera_id: str) -> np.ndarray
+        +save_video_clip(frames: List[np.ndarray], event_id: str) -> bool
+        -reconnect_camera(camera_id: str) -> bool
+    }
+    note right of VideoStreamManager
+        Управляет подключением к камерам через RTSP.\n
+        Отвечает за извлечение кадров, восстановление соединения\n
+        и сохранение видеоклипов событий в MinIO.
+    end note
+
+    class FramePreprocessor {
+        -night_vision_enabled: bool
+        -contrast_limits: Tuple[float, float]
+        +preprocess_frame(frame: np.ndarray) -> np.ndarray
+        +enhance_night_vision(frame: np.ndarray) -> np.ndarray
+        +correct_illumination(frame: np.ndarray) -> np.ndarray
+        -normalize_histogram(frame: np.ndarray) -> np.ndarray
+    }
+    note right of FramePreprocessor
+        Проводит предварительную обработку кадров:\n
+        - Усиливает ночное видение\n
+        - Корректирует освещение и контраст\n
+        - Нормализует гистограмму яркости для стабильности ИИ.
+    end note
+
+    class BehaviorDetector {
+        -model: tf.keras.Model
+        -confidence_threshold: float
+        +detect_behavior(frame: np.ndarray) -> DetectionResult
+        +load_model(model_path: str) -> bool
+        -preprocess_for_model(frame: np.ndarray) -> np.ndarray
+        -postprocess_predictions(predictions: np.ndarray) -> List[DetectionResult]
+    }
+    note right of BehaviorDetector
+        Использует нейросетевую модель для определения типа поведения.\n
+        Возвращает детекцию с типом события и уровнем уверенности.\n
+        Принимает предобработанный кадр, возвращает DetectionResult.
+    end note
+
+    class AnimalTracker {
+        -trackers: Dict[int, cv2.Tracker]
+        -next_track_id: int
+        +track_animals(frame: np.ndarray, detections: List[DetectionResult]) -> List[TrackedAnimal]
+        +update_tracks(frame: np.ndarray) -> List[TrackedAnimal]
+        -create_new_tracker(frame: np.ndarray, bbox: Tuple) -> int
+        -calculate_movement_patterns(tracks: List[TrackedAnimal]) -> MovementPattern
+    }
+    note right of AnimalTracker
+        Отслеживает отдельных животных между кадрами, чтобы не путать похожих особей.\n
+        Использует трекеры OpenCV (CSRT, KCF) и признаки внешности.\n
+        Сохраняет траектории и вычисляет скорость движения.
+    end note
+
+    class ShadowFilter {
+        -shadow_threshold: float
+        +filter_shadows(frame: np.ndarray) -> np.ndarray
+        +is_shadow(region: np.ndarray) -> bool
+        -extract_foreground(frame: np.ndarray) -> np.ndarray
+    }
+    note right of ShadowFilter
+        Устраняет ложные срабатывания, вызванные тенями.\n
+        Определяет теневые области по цвету и яркости.\n
+        Работает до детекции поведения для повышения точности.
+    end note
+
+    class EventAnalyzer {
+        -event_buffer: List[DetectionResult]
+        -min_events_for_alert: int
+        +analyze_events(detections: List[DetectionResult]) -> List[ValidatedEvent]
+        +filter_false_positives(detections: List[DetectionResult]) -> List[DetectionResult]
+        +detect_behavior_patterns(events: List[ValidatedEvent]) -> BehaviorPattern
+    }
+    note right of EventAnalyzer
+        Анализирует последовательность детекций во времени.\n
+        Фильтрует ложные срабатывания (например, тени, шум).\n
+        Объединяет несколько событий в один валидированный инцидент.\n
+        Выявляет паттерны поведения (например: "драка → смерть").
+    end note
+
+    class ResultAggregator {
+        -event_counter: Dict[EventType, int]
+        +aggregate_results(events: List[ValidatedEvent]) -> AggregatedResult
+        +create_event_json(events: List[ValidatedEvent]) -> str
+        +calculate_metrics() -> Dict[str, float]
+    }
+    note right of ResultAggregator
+        Агрегирует валидированные события в единый отчёт.\n
+        Формирует JSON-структуру для отправки в API, Kafka или Telegram.\n
+        Рассчитывает метрики: частота событий, уровень тревоги, активность.
+    end note
+
+    class ConfigManager {
+        -camera_configs: Dict[str, CameraConfig]
+        -detection_settings: DetectionSettings
+        +get_camera_config(camera_id: str) -> CameraConfig
+        +update_thresholds(thresholds: Dict[str, float]) -> bool
+        +load_config_from_file(path: str) -> bool
+    }
+    note right of ConfigManager
+        Централизованное управление конфигурацией всей системы.\n
+        Загружает настройки из файла (YAML/JSON).\n
+        Передаёт параметры: пороги, пути к моделям, настройки камер.
+    end note
+
+    ' === Классы данных (DTO) ===
+    class CameraConfig {
+        -camera_id: str
+        -rtsp_url: str
+        -night_vision: bool
+        -sensitivity: float
+        -fisheye_correction: bool
+        +get_connection_params() -> Dict
+        +validate_config() -> bool
+    }
+    note right of CameraConfig
+        Конфигурация одной камеры: URL, настройки ночного видения,\n
+        чувствительность детекции, коррекция рыбьего глаза.
+    end note
+
+    class DetectionResult {
+        -event_type: EventType
+        -confidence: float
+        -timestamp: datetime
+        -bounding_box: Tuple[int, int, int, int]
+        -camera_id: str
+        +to_dict() -> Dict
+        +is_valid() -> bool
+    }
+    note right of DetectionResult
+        Результат одной детекции: тип события, уверенность,\n
+        время, координаты рамки, ID камеры.
+    end note
+
+    class ValidatedEvent {
+        -detection_result: DetectionResult
+        -validated: bool
+        -false_positive_reason: str
+        +get_event_data() -> Dict
+    }
+    note right of ValidatedEvent
+        Детекция, прошедшая проверку на ложное срабатывание.\n
+    end note
+
+    class TrackedAnimal {
+        -track_id: int
+        -positions: List[Tuple[int, int]]
+        -current_bbox: Tuple[int, int, int, int]
+        -appearance_features: np.ndarray
+        +update_position(bbox: Tuple[int, int, int, int])
+        +calculate_speed() -> float
+        +get_movement_trajectory() -> List[Tuple[int, int]]
+    }
+    note right of TrackedAnimal
+        Представляет отслеживаемое животное.\n
+        Хранит историю позиций, текущую рамку, признаки внешности.\n
+        Вычисляет скорость и траекторию движения.
+    end note
+
+    class AggregatedResult {
+        -events: List[ValidatedEvent]
+        -timestamp: datetime
+        -summary: Dict[EventType, int]
+        +to_json() -> str
+        +get_alert_level() -> AlertLevel
+    }
+    note right of AggregatedResult
+        Финальный результат для внешних систем.\n
+        Содержит список валидированных событий, метрики и уровень тревоги.\n
+        Готов к отправке в API, Kafka или Telegram.
+    end note
+
+    ' === Перечисления (Enums) ===
+    enum EventType {
+        FIGHT
+        CRUSHING
+        AGITATION
+        DEATH
+        SICKNESS
+        NORMAL
+    }
+    note right of EventType
+        Типы событий, которые система может обнаружить:\n
+        Драка, давление, агритация, смерть, болезнь, нормальное поведение.
+    end note
+
+    enum AlertLevel {
+        CRITICAL
+            HIGH
+            MEDIUM
+            LOW
+            NONE
+        }
+        note right of AlertLevel
+            Уровни оповещения для уведомлений:\n
+            КРИТИЧЕСКИЙ — требует немедленного вмешательства,\n
+            НИЗКИЙ — информация для анализа, без срочности.
+        end note
+
+        ' === Связи между классами (переведены на русский) ===
+        VideoStreamManager --> CameraConfig : "использует конфигурации камер"
+        VideoStreamManager --> FramePreprocessor : "передаёт кадры на предобработку"
+        FramePreprocessor --> BehaviorDetector : "предоставляет обработанные кадры для детекции"
+        BehaviorDetector --> DetectionResult : "создаёт результаты детекции"
+        BehaviorDetector --> AnimalTracker : "передаёт детекции для трекинга"
+        FramePreprocessor --> ShadowFilter : "использует для фильтрации теней"
+        ShadowFilter --> BehaviorDetector : "предоставляет очищенные от теней кадры"
+        AnimalTracker --> TrackedAnimal : "управляет объектами отслеживаемых животных"
+        BehaviorDetector --> EventAnalyzer : "отправляет результаты детекции на анализ"
+        EventAnalyzer --> ValidatedEvent : "создаёт валидированные события"
+        EventAnalyzer --> DetectionResult : "валидирует детекции и отклоняет ложные"
+        EventAnalyzer --> BehaviorDetector : "предоставляет обратную связь для настройки порогов"
+        EventAnalyzer --> ResultAggregator : "отправляет валидированные события для агрегации"
+        ResultAggregator --> AggregatedResult : "формирует финальный отчёт"
+        ResultAggregator --> EventType : "использует типы событий для подсчёта"
+        ConfigManager --> CameraConfig : "управляет конфигурациями камер"
+        ConfigManager --> BehaviorDetector : "настраивает пороги уверенности и путь к модели"
+        ConfigManager --> EventAnalyzer : "настраивает буфер и минимальное число событий для тревоги"
+    }
+
+    package ai_models {
+        ' === Внешние ресурсы ===
+        class ExternalModel {
+            -model_path: str
+            -input_shape: Tuple[int, int, int]
+            +predict(frame: np.ndarray) -> np.ndarray
+            +is_loaded() -> bool
+        }
+        note right of ExternalModel
+            Абстракция для ИИ-модели: загрузка/инференс из MinIO/локально.
+        end note
+    }
+
+    package storage_clients {
+        class MinIOClient {
+            -bucket_name: str
+            +upload_video_clip(frames: List[np.ndarray], filename: str) -> bool
+            +generate_presigned_url(filename: str) -> str
+        }
+        note right of MinIOClient
+            Клиент MinIO: загрузка клипов, presigned URL для просмотра.
+        end note
+    }
+    ' === Зависимости от внешних ресурсов ===
+
+    BehaviorDetector --> ExternalModel : "использует для инференса"
+    VideoStreamManager --> MinIOClient : "использует для хранения видеок"
+
+    @enduml

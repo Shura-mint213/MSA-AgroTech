@@ -1,0 +1,56 @@
+@startuml Архитектура_АгроТех_Системы_v4_c3_локальный_ai
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C3: Компоненты внутри "Локальный AI" (TensorFlow Lite)
+
+Container_Boundary(локальный_ai, "локальный_ai (Локальный AI)") {
+    Component(video_input, "Video Input Manager", "Python, OpenCV", "Прием видео-потоков от камер, управление RTSP/ONVIF")
+    Component(frame_processor, "Frame Processor", "OpenCV, NumPy", "Предобработка кадров: коррекция освещения, ночное видение, стабилизация")
+    Component(behavior_detector, "Behavior Detector", "TensorFlow Lite", "Детекция событий: драки, задавливания, беспокойное поведение")
+    Component(animal_tracker, "Animal Tracker", "OpenCV", "Трекинг перемещений животных, идентификация особей")
+    Component(event_validator, "Event Validator", "Python", "Валидация событий, фильтрация ложных срабатываний")
+    Component(alert_manager, "Alert Manager", "Python", "Управление оповещениями, приоритизация событий")
+    
+    ' Внутренние связи
+    video_input --> frame_processor : "Сырые кадры видео\n(RTSP-поток)"
+    frame_processor --> behavior_detector : "Обработанные кадры\n(нормализованные, улучшенные)"
+    behavior_detector --> animal_tracker : "Координаты детекции\n(рамки объектов)"
+    animal_tracker --> event_validator : "Данные трекинга\n(паттерны движения)"
+    behavior_detector --> event_validator : "Сырые события детекции\n(оценки уверенности)"
+    event_validator --> alert_manager : "Валидированные события\n(уровни приоритета)"
+}
+
+' === Внешние компоненты ===
+Container(агенты_фермы, "Агенты на фермах", "Edge-устройства", "Источник видео-потоков")
+Container(rabbitmq, "RabbitMQ", "AMQP/MQTT", "Брокер сообщений для событий")
+Container(пушер, "Push уведомления", "MQTT", "Система оповещений")
+Container(redis, "Redis Cache", "Redis", "Кэш для временных данных")
+Container(prometheus, "Prometheus", "HTTP", "Система мониторинга")
+
+' === Внешние связи ===
+агенты_фермы --> video_input : "Видео-потоки\n(RTSP/ONVIF)"
+alert_manager --> rabbitmq : "Высокоприоритетные события\n(AMQP, <5 сек)"
+alert_manager --> пушер : "Критические алерты\n(MQTT, немедленные)"
+behavior_detector --> redis : "Кэш предсказаний модели\n(TTL 1h)"
+animal_tracker --> redis : "Состояния трекинга\n(данные сессии)"
+video_input --> prometheus : "Метрики здоровья потока\n(HTTP)"
+behavior_detector --> prometheus : "Метрики производительности детекции\n(точность, задержка)"
+
+' === Компоненты для обработки проблем ===
+Component(shadow_filter, "Shadow Filter", "OpenCV", "Фильтрация теней, уменьшение ложных срабатываний")
+Component(night_vision, "Night Vision Processor", "OpenCV", "Обработка ночных съемок, усиление")
+Component(model_manager, "Model Manager", "Python", "Управление версиями моделей, hot-swap")
+
+' Дополнительные внутренние связи
+frame_processor --> shadow_filter : "Кадры для анализа теней"
+shadow_filter --> behavior_detector : "Кадры без теней"
+frame_processor --> night_vision : "Кадры с низким освещением"
+night_vision --> behavior_detector : "Улучшенные ночные кадры"
+model_manager --> behavior_detector : "Обновления модели\n(TFLite-файлы)"
+
+SHOW_LEGEND()
+
+@enduml

@@ -1,0 +1,95 @@
+@startuml Архитектура_АгроТех_Системы_v4_c2
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+' === Участники ===
+Person(зоотехник, "Зоотехник", "Следит за животными")
+Person(директор, "Директор хозяйства", "Управление через веб-портал")
+Person(механик, "Механик", "Мониторинг техники")
+Person(дежурный_оператор, "Дежурный оператор", "Управление оффлайн-уведомлениями")
+
+System_Boundary(mvp_интерфейсы, "MVP Платформа Мониторинга Скота") {
+    System_Ext(веб_портал, "Веб-портал", "Angular", "REST API")
+    System_Ext(мобильное_приложение, "Мобильное приложение", "Flutter", "REST API")
+}
+
+System_Boundary(mvp_границы, "Границы MVP для ферм") {
+    Container_Boundary(auth_ctx, "Авторизация") {
+        Container(api_auth, "Сервер авторизации и аутентификации", "Keycloak/Node.js", "OAuth/JWT для ролей")
+    }
+
+    Container_Boundary(iot_платформа, "IoT платформа") {
+        Container(iot_шлюз, "IoT шлюз", "Node-RED", "Сбор данных с загонов, состояние фильтров, кормушек, поилок")
+        Container(видео_камеры, "Видео камеры", "", "Отслеживание поведения и состояния животных")
+    }
+
+    Container_Boundary(хранилище, "Хранилище временных данных фермы") {
+        ContainerDb(redis, "Redis Cache", "Redis", "Временный кэш видео/метрик для sync")
+    }
+
+    Container_Boundary(синхронизатор_ctx, "Контекст синхронизации") {
+        Container(hangfire, "Планировщик заданий", "HangFire", "Проверяет обновленность данных")
+    }
+
+    Container_Boundary(monitoring_ctx, "Мониторинг") {
+        Container(prometheus, "Мониторинг", "Prometheus", "Метрики/алерты")
+    }
+
+    Container_Boundary(pre_processing, "Предварительная обработка") {
+        Container(локальный_ai, "Локальный AI", "TensorFlow Lite", "Базовая детекция (драка/задавливание)")
+    }
+
+    Container(rabbitmq, "Брокер сообщений", "RabbitMQ", "Буфер событий")
+
+
+    Container(пушер, "Push уведомления", "MQTT + Mobile App", "Отправка push-уведомлений")
+
+    ' === Внешние системы системы ===
+    System_Ext(агенты_фермы, "Агенты на фермах", "Edge-устройства (камеры, датчики)", "Оффлайн-работа с кешированием")
+}
+
+' === Внутренние системы ===
+System(аграрная_платформа, "АгроПром Х - Цифровая платформа", "Платформа", "Микросервисная архитектура")
+
+System_Boundary(облачный_сервис_границы,"Границы облачного сервиса") {
+    Container(yandex_vision, "Yandex Vision", "AI/ML", "Глубокий анализ видео/поведения")
+    Container(yandex_cloud, "Облачный сервис", "Хранение", "Масштабируемое хранение данных")
+}
+
+' === Взаимосвязи ===
+Rel(зоотехник, api_auth, "Аутентификация", "OAuth")
+Rel(директор, api_auth, "Аутентификация", "OAuth")
+Rel(механик, api_auth, "Аутентификация", "OAuth")
+Rel(дежурный_оператор, api_auth, "Аутентификация", "OAuth")
+Rel(api_auth, мобильное_приложение, "Токен", "JWT")
+Rel(api_auth, веб_портал, "Токен", "JWT")
+Rel(api_auth, yandex_cloud, "Доступ к данным", "OAuth/JWT")
+Rel(iot_шлюз, агенты_фермы, "Передача данных", "Передаются данные датчиков (кормушки/вода)")
+Rel(видео_камеры, агенты_фермы, "Передача данных", "Передаются видео")
+Rel(агенты_фермы, redis, "Кэш pending", "AMQP; TTL 24h")
+Rel_L(yandex_vision, зоотехник, "Глубокий анализ", "Болезнь/прогноз", "Push")
+Rel_L(yandex_cloud, аграрная_платформа, "Передача метрик (поголовье, запасы, фильтрация воды)", "Kafka Protocol")
+Rel(redis, hangfire, "Проверка", "REST")
+Rel(hangfire, yandex_cloud, "Синхронизация данных", "HTTPS/MQTT, до 10 мин")
+Rel(пушер, зоотехник, "Оповещает", "Оповещения о событиях")
+Rel(пушер, дежурный_оператор, "Оповещает", "Оповещения о событиях")
+Rel(агенты_фермы, rabbitmq, "События", "MQTT; риск WiFi — LoRaWAN")
+Rel(rabbitmq, пушер, "Триггер уведомлений", "SMS/Push, <5 сек без WiFi")
+Rel_R(redis, prometheus, "Метрики хранения", "HTTP")
+Rel_R(api_auth, prometheus, "Метрики", "HTTP")
+Rel_R(локальный_ai, prometheus, "Метрики", "HTTP")
+Rel_R(hangfire, prometheus, "Метрики sync", "HTTP")
+Rel_R(yandex_vision, prometheus, "Метрики AI", "Push")
+Rel_R(пушер, prometheus, "Метрики", "HTTP")
+Rel_R(агенты_фермы, prometheus, "Edge-метрики (WiFi)", "MQTT")
+Rel_L(iot_шлюз, prometheus, "Метрики шлюза", "HTTP")
+Rel_L(prometheus, пушер, "Алерты о сбоях", "AMQP")
+Rel(локальный_ai, пушер, "Триггер локальных", "AMQP для драк")
+Rel(hangfire, yandex_vision, "Sync для анализа", "HTTPS, задержки >5 сек")
+Rel(yandex_vision, пушер, "Прогноз/болезнь", "Push via API")
+Rel(агенты_фермы, локальный_ai, "Предобработка видео", "Локально, <5 сек")
+Rel(локальный_ai, rabbitmq, "События для sync", "AMQP")
+Rel(rabbitmq, hangfire, "Триггер проверки", "AMQP")
+Rel_D(hangfire, yandex_cloud, "Upload метрик", "HTTPS; задержки WiFi >5 сек")
+
+@enduml
